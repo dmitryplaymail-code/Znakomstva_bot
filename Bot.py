@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import os
 import sqlite3
+import sys
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -10,31 +12,25 @@ from aiogram.types import (Message, CallbackQuery, ReplyKeyboardMarkup,
                            KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton)
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-# Настройки
-BOT_TOKEN = "8261117132:AAHVXMKSabbaAbB_UOfPAtp956M6fBd4QbQ"  # ← замени на свой, если нужно
+# ==================== НАСТРОЙКИ ====================
+# Приоритет: переменная окружения BOT_TOKEN, если нет — используем токен из кода (для теста)
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8261117132:AAHVXMKSabbaAbB_UOfPAtp956M6fBd4QbQ")
 
-# Логирование
-logging.basicConfig(level=logging.INFO)
+# Настройка логирования (вывод в консоль)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
 
 # Инициализация бота и диспетчера
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-# Состояния FSM для регистрации
-class Registration(StatesGroup):
-    gender = State()
-    name = State()
-    age_group = State()
-    photo = State()
-    search_gender = State()
-    search_age_group = State()
-
-# Состояние для изменения возрастной группы поиска
-class ChangeSearchAge(StatesGroup):
-    waiting_for_age = State()
-
-# Работа с базой данных
+# ==================== БАЗА ДАННЫХ ====================
 def init_db():
+    """Создание таблиц, если их нет"""
     conn = sqlite3.connect('kamaz_dating.db')
     cur = conn.cursor()
     cur.execute('''
@@ -50,6 +46,7 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
+    logger.info("База данных инициализирована")
 
 def user_exists(user_id):
     conn = sqlite3.connect('kamaz_dating.db')
@@ -126,7 +123,7 @@ def get_profiles(user_id, with_photo=True):
     conn.close()
     return [{'user_id': r[0], 'name': r[1], 'age_group': r[2], 'photo': r[3], 'gender': r[4]} for r in rows]
 
-# Клавиатуры
+# ==================== КЛАВИАТУРЫ ====================
 def main_menu_keyboard():
     kb = ReplyKeyboardMarkup(
         keyboard=[
@@ -188,17 +185,29 @@ def photo_filter_keyboard():
     ])
     return kb
 
-# Команда /start
+# ==================== СОСТОЯНИЯ FSM ====================
+class Registration(StatesGroup):
+    gender = State()
+    name = State()
+    age_group = State()
+    photo = State()
+    search_gender = State()
+    search_age_group = State()
+
+class ChangeSearchAge(StatesGroup):
+    waiting_for_age = State()
+
+# ==================== ОБРАБОТЧИКИ ====================
 @dp.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
     user_id = message.from_user.id
+    logger.info(f"Пользователь {user_id} запустил /start")
     if user_exists(user_id):
         await message.answer("Вы уже зарегистрированы.", reply_markup=main_menu_keyboard())
     else:
         await state.set_state(Registration.gender)
         await message.answer("👋 Добро пожаловать! Давай зарегистрируемся.\nВыбери свой пол:", reply_markup=gender_keyboard())
 
-# Регистрация: пол
 @dp.callback_query(StateFilter(Registration.gender), F.data.startswith("gender_"))
 async def process_gender(callback: CallbackQuery, state: FSMContext):
     gender = callback.data.split("_")[1]
@@ -207,7 +216,6 @@ async def process_gender(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text("Отлично! Теперь введи своё имя (можно никнейм):")
     await callback.answer()
 
-# Регистрация: имя
 @dp.message(StateFilter(Registration.name), F.text)
 async def process_name(message: Message, state: FSMContext):
     name = message.text.strip()
@@ -218,7 +226,6 @@ async def process_name(message: Message, state: FSMContext):
     await state.set_state(Registration.age_group)
     await message.answer("Выбери свою возрастную группу:", reply_markup=age_group_keyboard())
 
-# Регистрация: возрастная группа
 @dp.callback_query(StateFilter(Registration.age_group), F.data.startswith("age_"))
 async def process_age_group(callback: CallbackQuery, state: FSMContext):
     age_group = callback.data.split("_", 1)[1]
@@ -230,7 +237,6 @@ async def process_age_group(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-# Регистрация: фото (пропуск)
 @dp.callback_query(StateFilter(Registration.photo), F.data == "photo_skip")
 async def process_photo_skip(callback: CallbackQuery, state: FSMContext):
     await state.update_data(photo=None)
@@ -238,7 +244,6 @@ async def process_photo_skip(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text("Кого ты ищешь?", reply_markup=search_gender_keyboard())
     await callback.answer()
 
-# Регистрация: фото (получение)
 @dp.message(StateFilter(Registration.photo), F.photo)
 async def process_photo(message: Message, state: FSMContext):
     file_id = message.photo[-1].file_id
@@ -246,7 +251,6 @@ async def process_photo(message: Message, state: FSMContext):
     await state.set_state(Registration.search_gender)
     await message.answer("Кого ты ищешь?", reply_markup=search_gender_keyboard())
 
-# Регистрация: пол для поиска
 @dp.callback_query(StateFilter(Registration.search_gender), F.data.startswith("search_"))
 async def process_search_gender(callback: CallbackQuery, state: FSMContext):
     search_gender = callback.data.split("_")[1]  # male, female, any
@@ -258,7 +262,6 @@ async def process_search_gender(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-# Регистрация: возрастная группа для поиска и финиш
 @dp.callback_query(StateFilter(Registration.search_age_group), F.data.startswith("age_"))
 async def process_search_age_group(callback: CallbackQuery, state: FSMContext):
     search_age_group = callback.data.split("_", 1)[1]
@@ -285,7 +288,6 @@ async def process_search_age_group(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-# Главное меню: обработка кнопок
 @dp.message(F.text == "📋 Анкеты")
 async def show_photo_filter(message: Message):
     await message.answer("Выбери, с фото или без фото показывать анкеты:", reply_markup=photo_filter_keyboard())
@@ -298,7 +300,6 @@ async def change_search_age_start(message: Message, state: FSMContext):
         reply_markup=age_group_keyboard(include_any=True)
     )
 
-# Изменение возрастной группы поиска
 @dp.callback_query(StateFilter(ChangeSearchAge.waiting_for_age), F.data.startswith("age_"))
 async def process_change_age(callback: CallbackQuery, state: FSMContext):
     new_age = callback.data.split("_", 1)[1]
@@ -310,7 +311,6 @@ async def process_change_age(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(f"✅ Возрастная группа для поиска изменена на {new_age}.", reply_markup=main_menu_keyboard())
     await callback.answer()
 
-# Обработка выбора фильтра (с фото / без фото)
 @dp.callback_query(F.data.startswith("filter_"))
 async def process_photo_filter(callback: CallbackQuery, state: FSMContext):
     filter_type = callback.data.split("_")[1]
@@ -334,7 +334,6 @@ async def process_photo_filter(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
         return
 
-    # Сохраняем список анкет и текущий индекс в FSM (или в памяти). Используем state для хранения временных данных.
     await state.update_data(profiles=profiles, current_index=0, filter_type=filter_type)
     await show_profile(callback.message, 0, profiles, edit=True)
     await callback.answer()
@@ -349,21 +348,23 @@ async def show_profile(message: Message, index: int, profiles: list, edit=False)
     )
     keyboard = profile_navigation_keyboard(index, len(profiles))
 
-    if profile['photo']:
-        if edit:
-            await message.edit_media(
-                types.InputMediaPhoto(media=profile['photo'], caption=text),
-                reply_markup=keyboard
-            )
+    try:
+        if profile['photo']:
+            if edit:
+                await message.edit_media(
+                    types.InputMediaPhoto(media=profile['photo'], caption=text),
+                    reply_markup=keyboard
+                )
+            else:
+                await message.answer_photo(photo=profile['photo'], caption=text, reply_markup=keyboard)
         else:
-            await message.answer_photo(photo=profile['photo'], caption=text, reply_markup=keyboard)
-    else:
-        if edit:
-            await message.edit_text(text, reply_markup=keyboard)
-        else:
-            await message.answer(text, reply_markup=keyboard)
+            if edit:
+                await message.edit_text(text, reply_markup=keyboard)
+            else:
+                await message.answer(text, reply_markup=keyboard)
+    except Exception as e:
+        logger.error(f"Ошибка при показе анкеты: {e}")
 
-# Навигация по анкетам
 @dp.callback_query(F.data.startswith("nav_"))
 async def profile_navigation(callback: CallbackQuery, state: FSMContext):
     action = callback.data.split("_")[1]
@@ -397,13 +398,20 @@ async def profile_navigation(callback: CallbackQuery, state: FSMContext):
     await show_profile(callback.message, new_index, profiles, edit=True)
     await callback.answer()
 
-# Запуск бота
+# ==================== ЗАПУСК ====================
 async def main():
+    logger.info("Запуск бота...")
     init_db()
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
+        logger.info("Бот остановлен")
 
 if __name__ == "__main__":
-  if __name__ == "__main__":
-    print("🚀 Бот запускается...")
-    init_db()
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Бот остановлен вручную")
+    except Exception as e:
+        logger.exception(f"Критическая ошибка: {e}")
