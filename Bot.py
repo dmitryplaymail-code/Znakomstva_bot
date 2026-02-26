@@ -403,4 +403,7 @@ async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
+  if __name__ == "__main__":
+    print("🚀 Бот запускается...")
+    init_db()
     asyncio.run(main())
