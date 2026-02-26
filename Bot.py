@@ -13,7 +13,8 @@ from aiogram.types import (Message, CallbackQuery, ReplyKeyboardMarkup,
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 # ==================== НАСТРОЙКИ ====================
-# Приоритет: переменная окружения BOT_TOKEN, если нет — используем токен из кода (для теста)
+# Приоритет: переменная окружения BOT_TOKEN, если нет — используется токен из кода (для удобства)
+# Настоятельно рекомендуется задать BOT_TOKEN в переменных окружения на хостинге!
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8261117132:AAHVXMKSabbaAbB_UOfPAtp956M6fBd4QbQ")
 
 # Настройка логирования (вывод в консоль)
@@ -262,6 +263,7 @@ async def process_search_gender(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
+# ИСПРАВЛЕННАЯ ФУНКЦИЯ (была ошибка с редактированием и reply-клавиатурой)
 @dp.callback_query(StateFilter(Registration.search_age_group), F.data.startswith("age_"))
 async def process_search_age_group(callback: CallbackQuery, state: FSMContext):
     search_age_group = callback.data.split("_", 1)[1]
@@ -279,7 +281,10 @@ async def process_search_age_group(callback: CallbackQuery, state: FSMContext):
         search_age_group=search_age_group
     )
     await state.clear()
-    await callback.message.edit_text(
+    # Удаляем сообщение с inline-кнопками, так как дальше пойдёт обычная клавиатура
+    await callback.message.delete()
+    # Отправляем новое сообщение с главным меню
+    await callback.message.answer(
         f"✅ Регистрация завершена!\n"
         f"Имя: {data['name']}\n"
         f"Твой возраст: {data['age_group']}\n"
